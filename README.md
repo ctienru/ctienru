@@ -1,174 +1,115 @@
-# Multilingual Podcast Search
+# Podvein — Bilingual Podcast Search
 
-## Find the moment, not just the episode.
+**Find the moment, not just the episode.**
 
-- Search podcast transcripts.
-- Read the matching passage.
-- Jump to the audio.
+Podvein searches podcast transcripts in Chinese and English. It returns the matching passage and plays the episode from that passage's timestamp.
 
-- Built independently by Terri: retrieval, ML infrastructure, and the web experience.
+- Live: https://podvein.com
+- Blog: https://ctienru.github.io
+- Built independently by Tien Ru (Terri) Chen. The code is in private repositories.
 
-[System architecture](#built-from-ingestion-to-interaction) · [Evaluation](#fragment-level-retrieval-quality)
-
----
-
-## A passage to read. A moment to hear.
-
-- Find a matching passage with its episode and audio timestamp.
-- Explore results through English and Traditional Chinese interfaces.
-
-![Local SAT search results for reinforcement learning, showing transcript context, timestamps, and playback controls.](assets/local-sat-search-reinforcement-learning.png)
-
-*Local SAT search: “reinforcement learning,” with matching passages grouped by episode.*
+[Architecture](#architecture) · [Retrieval](#retrieval) · [Evaluation](#evaluation)
 
 ---
 
-## Listen from the passage.
+## What it does
 
-- Start playback from a passage’s timestamp.
-- Keep the episode player visible at the bottom while browsing results.
-- Pause, seek, skip back or forward 10 seconds, and adjust playback speed.
+- Search transcript passages, shows, and episodes.
+- Read the matching passage with its nearby context.
+- Play the episode from the passage's timestamp.
+- Use the interface in English or Traditional Chinese.
 
-![Local SAT audio player with an active transcript passage, episode timeline, and bottom playback controls.](assets/local-sat-audio-player.png)
+![Search results with matching passages grouped by episode.](assets/local-sat-search-reinforcement-learning.png)
 
-*Local SAT player opened from 8:40, with playback controls and transcript context visible.*
+![Episode player opened from a passage, with playback controls.](assets/local-sat-audio-player.png)
 
 ---
 
-## Built from ingestion to interaction.
-
-- **Web app:** presents search results and audio playback.
-- **API gateway:** connects the web experience to retrieval.
-- **Offline jobs:** prepare the corpus, embeddings, and indexes.
-- **Search service:** loads a validated generation to answer queries.
+## Architecture
 
 ```text
 ONLINE
 
-+-----------------------+    +---------------------------+
-| Web app + BFF         |--->| Public API gateway        |
-| Next.js / TypeScript  |    | Django REST Framework     |
-+-----------------------+    +-------------+-------------+
-                                          |
-                                          v
-                             +--------------------------+
-                             | Search API               |
-                             | Python / FastAPI         |
-                             +------+-------------+-----+
-                                    |             |
-                                    v             v
-                       +-----------------+  +-----------------+
-                       | Local artifacts |  | Query embedding |
-                       | SQLite + NumPy  |  | Dense / Hybrid  |
-                       +--------^--------+  +-----------------+
-                                |
-                         loaded for serving
-                                |
-OFFLINE                         |
-                                |
-                       +--------+----------------+
-                       | Validated generation    |
-                       | Index, vectors, metadata|
-                       +------------^------------+
-                                    |
-+--------+    +-----------------------------+
-| Ingest |--->| Corpus embeddings + indexes |
-+--------+    +-----------------------------+
++------------------+    +------------------+    +-------------------+    +---------------------+
+| Web app + BFF    |--->| Public API       |--->| Search service    |--->| OpenSearch          |
+| Next.js / TS     |    | Django REST      |    | Python / FastAPI  |    | passages: BM25 +    |
+| Vercel           |    | Framework        |    | query embedding   |    |   vectors           |
++------------------+    +------------------+    | on CPU            |    | shows, episodes     |
+                                                +-------------------+    +----------^----------+
+                                                                                    |
+OFFLINE                                                                       indexed from
+                                                                                    |
++--------------------------------------+         immutable corpus releases          |
+| Ingest (PostgreSQL)                  |--------------------------------------------+
+| RSS -> audio -> ASR -> passages      |         show and episode metadata export
++--------------------------------------+
 ```
 
-**Stack:** Next.js · React · TypeScript · Django REST Framework · FastAPI · SQLite FTS5 · NumPy · multilingual-e5 · Docker
+- The browser only calls the web app's same-origin backend (BFF). It never calls the search service.
+- The Django API calls the search service's internal API with a workload token.
+- The search service and OpenSearch run with Docker Compose behind an Nginx edge on DigitalOcean. The frontend runs on Vercel.
+- Ingestion runs step by step from a CLI. Speech recognition runs offline on Apple silicon with a pinned pretrained model.
+- Ingestion publishes immutable releases. Serving reads releases, not live ingestion state.
+- The transcripts on the site today still come from the previous version's pipeline. The v5 ingestion pipeline has run end to end on real audio, and it produces the show and episode metadata.
+
+**Stack:** Next.js · TypeScript · Django REST Framework · FastAPI · OpenSearch · multilingual-E5 · PostgreSQL · Docker Compose · Nginx · Vercel · GitHub Actions
 
 ---
 
-## Fragment-level retrieval quality.
-
-- **Corpus:** 589 episode groups · 91,334 fragments.
-- **Queries:** 42 frozen queries · 21 Chinese + 21 English.
-- **Methods:** BM25, Dense, and RRF fusion · up to 50 candidates per query.
-- **Evaluation:** top five fragments · 447 query–fragment judgments graded 0–3.
-- **Coverage:** all 630 top-five positions judged.
-- **Evidence:** LLM-provisional development labels.
-
-| Method | nDCG@5 | MRR@5 |
-| --- | ---: | ---: |
-| BM25 | 0.5748 | 0.5988 |
-| Dense | 0.6596 | 0.6861 |
-| RRF fusion | 0.6641 | 0.6782 |
-
-- **Averaging:** all 42 queries. The separate 41-query conditional average is not shown here.
-- **Scoring:** nDCG uses graded gains; MRR requires grade ≥ 2.
-- **Verified:** protocol validation, judgment coverage, and deterministic report replay.
-- **Pending:** human verification and confidence intervals; method differences remain descriptive.
-
-
----
-
-## From a query to a passage.
-
-- Retrieve fragments through keyword and semantic search.
-- Fuse their rankings with Reciprocal Rank Fusion (RRF).
-- Group matching fragments into episodes for display.
+## Retrieval
 
 ```text
-                            Query
-                              |
-               +--------------+--------------+
-               |                             |
-               v                             v
-         BM25 / FTS5                  Query embedding
-               |                             |
-               |                             v
-               |                        NumPy exact
-               |                             |
-               +--------------+--------------+
-                              |
-                              v
-                    Reciprocal Rank Fusion
-                              |
-                              v
-                       Rank fragments
-                              |
-                              v
-                       Group by episode
-                              |
-                              v
-                Episode + Evidence + Timestamp
+                         Query
+                           |
+             +-------------+-------------+
+             |                           |
+             v                           v
+      BM25 (ICU analysis)        multilingual-E5 query vector
+             |                           |
+             |                           v
+             |                  exact cosine over passages
+             |                           |
+             +-------------+-------------+
+                           |
+                           v
+            Reciprocal Rank Fusion (k = 60)
+          keep passages found by both paths
+                           |
+                           v
+          Group by episode (up to 3 passages)
+                           |
+                           v
+          Episode + passage + timestamp
 ```
 
-- **RRF:** combines rank positions.
-- **BM25 / Dense modes:** each uses its own retrieval path.
+- **BM25:** OpenSearch ICU tokenizer and folding for mixed Chinese and English text.
+- **Dense:** `multilingual-e5-large`. Serving uses exact cosine over all passage vectors. I studied HNSW but do not use it in serving.
+- **Fusion:** RRF is implemented in the search service, not with OpenSearch's built-in fusion.
+- **Shows and episodes:** separate BM25 indexes over titles, authors, and descriptions.
 
 ---
 
-## Replaying a versioned fragment benchmark.
+## Evaluation
 
-- Run the Search retrieval implementation and save ranked fragments with their evidence.
-- Evaluate saved runs against exact query–fragment judgments.
-- Recompute and verify the report through doctor and replay.
-- Scope: fragment retrieval quality in the bound evaluation experiment.
+- **Queries:** 42 frozen queries, 21 Chinese and 21 English.
+- **Judgments:** graded 0–3 per episode. All labels are LLM-provisional. Human verification is pending.
+- **Metrics:** nDCG@10, MRR@10, and Recall@10 with ir-measures. Comparisons use a paired bootstrap with 10,000 resamples.
+- **Traceability:** each run records dataset, corpus, and code versions. The evaluator refuses to compare incompatible runs.
 
-```text
-Transcript fragments + frozen queries
-                    |
-                    v
-       Validated search generation
-                    |
-                    v
-      BM25 / Dense / RRF retrieval
-                    |
-                    v
-       Saved fragment run matrix
-                    |
-                    v
- Exact fragment judgments --> Benchmark evaluator
-                                      |
-                                      v
-                         Report + doctor + replay
-```
+| Method | nDCG@10 |
+| --- | ---: |
+| BM25 | 0.7909 |
+| Dense | 0.7688 |
+| Hybrid (RRF) | 0.8504 |
 
-- **Display unit:** episodes with matching passages.
-- **Evaluation unit:** individual fragments.
-- **Experiment identity:** dataset, corpus, generation, retrieval profiles, and code version.
-- **Environment:** dedicated evaluation corpus and generation.
-- **Language slices:** query language; episode-language filtering requires its own validation.
+- These are the v5 OpenSearch results on a frozen evaluation corpus.
+- I compared v5 with the previous version on the same queries. No difference reached p < 0.05.
+- Differences between methods are descriptive until the labels are verified by a human.
 
+**CI gate:** CI indexes a synthetic corpus into a real OpenSearch container. For BM25, dense, and hybrid, every per-query nDCG@10 must equal a committed baseline, or the build fails.
+
+---
+
+## How I build
+
+I develop with Claude Code. I review generated changes against acceptance criteria and check retrieval behavior with frozen queries before shipping.
