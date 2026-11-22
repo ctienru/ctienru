@@ -1,18 +1,24 @@
-# Podvein — Bilingual Podcast Search
+# Tien Ru (Terri) Chen
 
-**Find the moment, not just the episode.**
+I'm a backend and full-stack engineer. I build web APIs, data integrations, search systems, and LLM extraction pipelines with evaluation. I write about them on my [blog](https://ctienru.github.io).
 
-Podvein searches podcast transcripts in Chinese and English. It returns the matching passage and plays the episode from that passage's timestamp.
+## [Podvein](https://podvein.com)
 
-- Live: https://podvein.com
-- Blog: https://ctienru.github.io
-- Built independently by Tien Ru (Terri) Chen. The code is in private repositories.
+Podvein searches podcast transcripts in Chinese and English and plays audio from the matching timestamp. I built the search service with OpenSearch and the web app with Next.js.
 
-[Architecture](#architecture) · [Retrieval](#retrieval) · [Evaluation](#evaluation)
+## [LLM Evidence Checker for the Medicare GLP-1 Bridge](https://github.com/ctienru/bridge-evidence-check)
+
+I built a Python CLI that checks chart evidence before attestation for the Medicare GLP-1 Bridge. An LLM only extracts fields and quotes. Deterministic code verifies every quote against the source text, applies versioned decision tables based on CMS guidance, and reports an evidence status for each condition. On the 7-variant dev set, there were zero false supports across the 112 condition rows labeled non-supported. The repository has the [dev and holdout results](https://github.com/ctienru/bridge-evidence-check#3-results) and the [public pull request history](https://github.com/ctienru/bridge-evidence-check/pulls?q=is%3Apr+is%3Amerged).
 
 ---
 
-## What it does
+## Podvein details
+
+I built Podvein independently. The code is in private repositories.
+
+[Architecture](#architecture) · [Retrieval](#retrieval) · [Evaluation](#evaluation)
+
+### What it does
 
 - Search transcript passages, shows, and episodes.
 - Read the matching passage with its nearby context.
@@ -25,7 +31,7 @@ Podvein searches podcast transcripts in Chinese and English. It returns the matc
 
 ---
 
-## Architecture
+### Architecture
 
 ```text
 ONLINE
@@ -45,18 +51,18 @@ OFFLINE                                                                       in
 +--------------------------------------+
 ```
 
-- The browser only calls the web app's same-origin backend (BFF). It never calls the search service.
+- The browser sends all API requests through the web app's same-origin backend (BFF).
 - The Django API calls the search service's internal API with a workload token.
 - The search service and OpenSearch run with Docker Compose behind an Nginx edge on DigitalOcean. The frontend runs on Vercel.
 - Ingestion runs step by step from a CLI. Speech recognition runs offline on Apple silicon with a pinned pretrained model.
-- Ingestion publishes immutable releases. Serving reads releases, not live ingestion state.
-- The transcripts on the site today still come from the previous version's pipeline. The v5 ingestion pipeline has run end to end on real audio, and it produces the show and episode metadata.
+- Ingestion publishes immutable releases. The serving indexes are built from those releases.
+- The site's show and episode metadata come from the current ingestion pipeline. The transcripts were produced by an earlier pipeline. The current pipeline has run end to end on real audio, and the transcripts have not been regenerated with it yet.
 
 **Stack:** Next.js · TypeScript · Django REST Framework · FastAPI · OpenSearch · multilingual-E5 · PostgreSQL · Docker Compose · Nginx · Vercel · GitHub Actions
 
 ---
 
-## Retrieval
+### Retrieval
 
 ```text
                          Query
@@ -83,13 +89,13 @@ OFFLINE                                                                       in
 ```
 
 - **BM25:** OpenSearch ICU tokenizer and folding for mixed Chinese and English text.
-- **Dense:** `multilingual-e5-large`. Serving uses exact cosine over all passage vectors. I studied HNSW but do not use it in serving.
-- **Fusion:** RRF is implemented in the search service, not with OpenSearch's built-in fusion.
+- **Dense:** `multilingual-e5-large`. Serving uses exact cosine over all passage vectors.
+- **Fusion:** I implemented reciprocal rank fusion in the search service.
 - **Shows and episodes:** separate BM25 indexes over titles, authors, and descriptions.
 
 ---
 
-## Evaluation
+### Evaluation
 
 - **Queries:** 42 frozen queries, 21 Chinese and 21 English.
 - **Judgments:** graded 0–3 per episode. All labels are LLM-provisional. Human verification is pending.
@@ -110,6 +116,6 @@ OFFLINE                                                                       in
 
 ---
 
-## How I build
+### How I build Podvein
 
-I develop with Claude Code. I review generated changes against acceptance criteria and check retrieval behavior with frozen queries before shipping.
+I use a coding agent to develop Podvein. I review generated changes against acceptance criteria and check retrieval behavior with frozen queries before shipping.
